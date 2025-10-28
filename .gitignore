@@ -1,1 +1,17 @@
+.idea/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage*
+.mypy_cache/
+.ruff_cache/
+.venv/
+env/
+venv/
+bot_logs/
+*.log
+
+# Secrets
 .env
+.env.*

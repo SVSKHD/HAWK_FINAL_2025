@@ -1,0 +1,47 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E","F","W","I","UP","B","BLE","SIM","PT","TRY","PL","RUF"]
+ignore = ["E501","PLR2004"]
+exclude = [".git",".venv","__pycache__","bot_logs","model_training/**/artifacts"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.ruff.isort]
+known-first-party = ["apps","mt5","bot_runner"]
+combine-as-imports = true
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_optional = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_any_generics = true
+strict_equality = true
+ignore_missing_imports = true
+
+[tool.pyright]
+reportMissingImports = "warning"
+reportMissingTypeStubs = "warning"
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+
+[tool.bandit]
+skips = ["B101"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["."]

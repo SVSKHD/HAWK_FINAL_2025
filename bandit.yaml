@@ -1,0 +1,2 @@
+excludes: ["tests", "bot_logs", ".venv"]
+skips: ["B101"]
