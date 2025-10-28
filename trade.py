@@ -1,0 +1,191 @@
+import MetaTrader5 as mt5
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timezone
+from notify import send_discord_message
+from mt5 import init_mt5
+from utils_formatting import format_discord_trade_message, _format_failure, _format_success, normalize_trade_result
+
+# optional: tighten type a bit
+
+TradeType = str  # or Literal["buy","sell"] if you like
+
+
+import re
+from datetime import datetime, timezone
+
+MAX_COMMENT_LEN = 31  # common MT5/broker limit (some allow 32)
+
+_ascii_re = re.compile(r"[^\x20-\x7E]")  # printable ASCII only
+
+def make_order_comment(base: Optional[str] = None) -> str:
+    """
+    Build a broker-safe order comment:
+    - ASCII only (no emojis, no en-dash)
+    - <= 31 chars
+    """
+    # keep it short: YYYYMMDD-HHMMSS (15 chars)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+    # avoid fancy punctuation: use plain hyphen
+    base = (base or "AstraBot").strip().replace("–", "-").replace("—", "-")
+    raw = f"{base} {ts}"
+
+    # remove non-ASCII
+    raw = _ascii_re.sub("", raw)
+
+    # trim to limit
+    return raw[:MAX_COMMENT_LEN]
+
+
+
+def place_trade(symbol: str, trade_type: TradeType, volume: float, comment: Optional[str] = None):
+    init_mt5("place_trade from trade.py")
+
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        msg = f"❌ No tick data for {symbol}"
+        print(msg)
+        send_discord_message("critical", msg)
+        return False
+
+    is_buy = (trade_type == "buy")
+    price = tick.ask if is_buy else tick.bid
+    order_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    order_comment = make_order_comment(comment or "AstraBot")
+
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": float(volume),
+        "type": order_type,
+        "price": float(price),
+        "deviation": 10,
+        "comment": order_comment,
+        "type_filling": mt5.ORDER_FILLING_FOK,
+        "type_time": mt5.ORDER_TIME_GTC
+    }
+
+    result = mt5.order_send(request)
+    print(result)
+
+    if result is None:
+        msg = (
+            "⚠️ **Trade Failed (no response)**\n"
+            f"**Symbol:** {symbol}\n**Type:** {trade_type.upper()}\n"
+            f"**Volume:** {volume}\n**Price (attempted):** {price}"
+        )
+        print(msg)
+        send_discord_message("critical", msg)
+        return False
+
+    if int(getattr(result, "retcode", 0)) != mt5.TRADE_RETCODE_DONE:
+        msg = _format_failure(symbol, trade_type, volume, price, result)
+        print(msg)
+        send_discord_message("critical", msg)
+        return False
+
+    msg = _format_success(symbol, trade_type, volume, price, result)
+    print(msg)
+    send_discord_message("info", msg)
+    return result
+
+
+
+
+def close_all_trades(*, deviation: int = 10) -> List[Dict[str, Any]]:
+    results: List[Dict[str, Any]] = []
+    positions = mt5.positions_get() or ()
+    for pos in positions:
+        symbol = pos.symbol
+        # You might already have _select_symbol/_get_tick; if not, inline similar logic
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            n = normalize_trade_result(
+                context={"symbol": symbol, "side": "close", "comment": "No tick data during close_all_trades"}
+            )
+            ch, msg = format_discord_trade_message(n)
+            print(msg)
+            send_discord_message(ch, msg)
+            continue
+
+        is_long = (pos.type == mt5.POSITION_TYPE_BUY)
+        close_type = mt5.ORDER_TYPE_SELL if is_long else mt5.ORDER_TYPE_BUY
+        price = tick.bid if is_long else tick.ask
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "type": close_type,
+            "position": int(getattr(pos, "ticket", 0)),
+            "price": float(price),
+            "volume": float(pos.volume),
+            "deviation": int(deviation),
+            "type_filling": mt5.ORDER_FILLING_FOK,
+            "type_time": mt5.ORDER_TIME_GTC,
+            "comment": f"bot-2025 close {'long' if is_long else 'short'}",
+        }
+        res = mt5.order_send(request)
+        n = normalize_trade_result(
+            request=request,
+            response=res,
+            context={"symbol": symbol, "side": "SELL" if is_long else "BUY", "volume": float(pos.volume), "price": price},
+        )
+        ch, msg = format_discord_trade_message(n)
+        print(msg)
+        send_discord_message(ch, msg)
+        results.append(n)
+        return n
+
+
+def close_symbol_positions(symbol: str, *, deviation: int = 10) -> List[Dict[str, Any]]:
+    results: List[Dict[str, Any]] = []
+    positions = mt5.positions_get(symbol=symbol) or ()
+    for pos in positions:
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            n = normalize_trade_result(
+                context={"symbol": symbol, "side": "close", "comment": "No tick data during close_symbol_positions"}
+            )
+            ch, msg = format_discord_trade_message(n)
+            print(msg)
+            send_discord_message(ch, msg)
+            continue
+
+        is_long = (pos.type == mt5.POSITION_TYPE_BUY)
+        close_type = mt5.ORDER_TYPE_SELL if is_long else mt5.ORDER_TYPE_BUY
+        price = tick.bid if is_long else tick.ask
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "type": close_type,
+            "position": int(getattr(pos, "ticket", 0)),
+            "price": float(price),
+            "volume": float(pos.volume),
+            "deviation": int(deviation),
+            "type_filling": mt5.ORDER_FILLING_FOK,
+            "type_time": mt5.ORDER_TIME_GTC,
+            "comment": f"bot-2025 close {'long' if is_long else 'short'}",
+        }
+        res = mt5.order_send(request)
+        n = normalize_trade_result(
+            request=request,
+            response=res,
+            context={"symbol": symbol, "side": "SELL" if is_long else "BUY", "volume": float(pos.volume), "price": price},
+        )
+        ch, msg = format_discord_trade_message(n)
+        print(msg)
+        send_discord_message(ch, msg)
+        results.append(n)
+    return results
+
+
+
+
+# quick test (will actually try to trade if MT5 connected!)
+if __name__ == "__main__":
+    place_trade("BTCUSD", "buy", 0.5)
+    positions=close_symbol_positions("EURUSD")
+    print(positions)
+    all_positions = close_all_trades()
+    # print(all_posiitons)
