@@ -11,7 +11,6 @@ from notify import send_discord_message
 from mt5 import init_mt5
 
 
-
 Action = Literal["PLACE", "HOLD", "CLOSE", "NONE"]
 Side = Literal["LONG", "SHORT"]
 
@@ -46,8 +45,6 @@ def _infer_side(pc: PriceComponent) -> Side:
     return "LONG" if dirn == "UP" else "SHORT"
 
 
-
-
 def _fmt_place_lines(decision: 'ThresholdDecision') -> str:
     m = decision.metrics or {}
     symbol = m.get("symbol") or decision.trade_details.placed_symbol
@@ -71,6 +68,28 @@ def _fmt_place_lines(decision: 'ThresholdDecision') -> str:
         f"Current Price: {current_price}",
         f"Latest High: {latest_high}",
         f"Latest Low: {latest_low}",
+        "Strategy: ThresholdV1",
+    ]
+    return "\n".join(str(x) for x in lines if x is not None)
+
+
+def _fmt_close_lines(decision: 'ThresholdDecision') -> str:
+    m = decision.metrics or {}
+    symbol = m.get("symbol") or decision.trade_details.placed_symbol
+    ratio = m.get("threshold_ratio") or m.get("ratio") or 0
+    start_price = m.get("start_price")
+    current_price = m.get("current_price")
+    pips_moved = m.get("pips_moved")
+    threshold_pips = m.get("threshold_pips")
+
+    lines = [
+        "TRADE SIGNAL: CLOSE (2nd threshold)",
+        f"Symbol: {symbol}",
+        f"Threshold Ratio: {ratio:.2f}",
+        f"Pips Moved: {pips_moved}",
+        f"Threshold (pips): {threshold_pips}",
+        f"Start Price: {start_price}",
+        f"Current Price: {current_price}",
         "Strategy: ThresholdV1",
     ]
     return "\n".join(str(x) for x in lines if x is not None)
@@ -169,8 +188,11 @@ def execute_threshold_decision(decision: ThresholdDecision) -> Dict[str, Any]:
     if decision.signal == "PLACE":
         side = decision.trade_details.direction_trade_placed  # LONG or SHORT
 
-        # Notify about the signal itself
-        send_discord_message("info", _fmt_place_lines(decision))
+        # Notify about the signal itself (never block trading on notify issues)
+        try:
+            send_discord_message("info", _fmt_place_lines(decision))
+        except Exception:
+            pass
 
         # 🔁 Map LONG/SHORT -> buy/sell for trade.place_trade API
         trade_type = "buy" if side == "LONG" else "sell"
@@ -188,6 +210,12 @@ def execute_threshold_decision(decision: ThresholdDecision) -> Dict[str, Any]:
         return {"executed": ok, "message": "PLACE sent", "result": res}
 
     if decision.signal == "CLOSE":
+        # Notify intent before attempting broker call
+        try:
+            send_discord_message("info", _fmt_close_lines(decision))
+        except Exception:
+            pass
+
         res_list = close_symbol_positions(symbol, deviation=10)
         ok = len(res_list) > 0
         return {"executed": ok, "message": "CLOSE sent", "result": res_list}

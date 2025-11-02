@@ -1,4 +1,4 @@
-# runner.py — fixed & instrumented (handles dict/float current_price)
+# runner.py — fixed & instrumented (handles dict/float current_price) + 10:30 IST refresher
 from __future__ import annotations
 
 import time
@@ -9,6 +9,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo  # NEW
 
 from price_manager import PriceManager
 from prices import get_extremes_relative_to_price
@@ -128,6 +129,59 @@ def _send_snapshot(symbols: Iterable[str], pm: PriceManager, *, label: str) -> N
     with open(folder / f"{label.lower().replace(' ', '_')}_snapshot.json", "w", encoding="utf-8") as f:
         json.dump(snapshot, f, indent=2)
 
+# ---------- 10:30 IST special refresh ----------
+def _send_1030_refresh_if_due(symbols: Iterable[str], pm: PriceManager, *, logs_root: Path = Path("bot_logs")) -> None:
+    """
+    One-time message between 10:30:00–10:30:59 IST with a compact snapshot.
+    Uses bot_logs/YYYY-MM-DD/.1030_sent as an idempotency marker.
+    """
+    ist = ZoneInfo("Asia/Kolkata")
+    now_ist = datetime.now(tz=ist)
+    # only act inside the 10:30 minute
+    if not (now_ist.hour == 10 and now_ist.minute == 30):
+        return
+
+    day_dir = logs_root / now_ist.date().isoformat()
+    day_dir.mkdir(parents=True, exist_ok=True)
+    marker = day_dir / ".1030_sent"
+    if marker.exists():
+        return
+
+    lines = [f"⚡ **10:30 Refresh** — {now_ist.isoformat(timespec='seconds')} IST", ""]
+    for s in symbols:
+        # start price via your existing helpers/PM
+        raw_start = pm.get_start_price(s)
+        anchors = _normalize_anchor_dict(raw_start)
+        sp = _resolve_start_price(anchors)
+
+        # current price via PM (accept dict/float)
+        cur_raw = pm.get_current_price(s)
+        cp = _extract_price(cur_raw)
+
+        # threshold ratio using your existing calculator
+        try:
+            pc_temp = PriceComponent(
+                symbol=s,
+                start_price=float(sp) if sp is not None else 0.0,
+                current_price=float(cp) if cp is not None else 0.0,
+                latest_high=float(cp) if cp is not None else 0.0,
+                latest_low=float(cp) if cp is not None else 0.0,
+            )
+            ratio = _compute_threshold_ratio(s, pc_temp)
+        except Exception:
+            ratio = None
+
+        sp_txt = f"{sp:.5f}" if isinstance(sp, (int, float)) and sp is not None else "n/a"
+        cp_txt = f"{cp:.5f}" if isinstance(cp, (int, float)) and cp is not None else "n/a"
+        ratio_txt = f"{ratio:.2f}x" if isinstance(ratio, (int, float)) else "n/a"
+        lines.append(f"• {s}: start {sp_txt} → now {cp_txt} · ratio **{ratio_txt}**")
+
+    try:
+        send_discord_message("info", "\n".join(lines))
+    finally:
+        # Write the marker regardless, to guarantee once-per-day behavior.
+        marker.write_text("sent", encoding="utf-8")
+
 # ---------- main ----------
 def run(
     symbols: Iterable[str],
@@ -163,7 +217,7 @@ def run(
                 cur_raw = pm.get_current_price(s)  # float OR dict in your codebase
                 cur_f = _extract_price(cur_raw)
                 if cur_f is None:
-                    send_discord_message("critical", f"[{s}] No usable price (tick missing). Skipping this tick.")
+                    send_discord_message("alert", f"[{s}] No usable price (tick missing). Skipping this tick.")
                     continue
 
                 if on_tick:
@@ -233,6 +287,9 @@ def run(
                 if on_decision:
                     on_decision(s, getattr(decision, "__dict__", {"signal": str(decision)}))
                 execute_threshold_decision(decision)
+
+            # 10:30 IST special refresh (once per day)
+            _send_1030_refresh_if_due(symbols, pm, logs_root=Path("bot_logs"))
 
             time.sleep(interval_sec)
 
