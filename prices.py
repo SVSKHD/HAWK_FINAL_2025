@@ -387,9 +387,10 @@ def get_extremes_relative_to_price(
 if __name__ == "__main__":
     # Use your broker's server TZ (often Etc/GMT-3). Try without date (auto today + weekend shift).
     from datetime import date as _date
+    symbol = "XAGUSD"
     SERVER_TZ = "Etc/GMT-3"
-    start_price = get_8am_snapshot("EURUSD", requested_date=None, server_timezone=SERVER_TZ)
+    start_price = get_8am_snapshot(symbol, requested_date=None, server_timezone=SERVER_TZ)
     start_price_at_anchor = start_price['anchors']['price_at_anchor']
-    print(start_price['anchors']['price_at_anchor'])
-    print(get_current_price("EURUSD"))
-    print("high and low",get_extremes_relative_to_price("EURUSD",start_price_at_anchor,None))
+    print("start:",start_price['anchors']['price_at_anchor'])
+    print("current",get_current_price(symbol))
+    print("high and low",get_extremes_relative_to_price(symbol,start_price_at_anchor,None))

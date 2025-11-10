@@ -2,6 +2,15 @@
 
 from pydantic import BaseModel
 from typing import Dict
+from zoneinfo import ZoneInfo
+
+HOUR = 10
+MINUTES = 30
+SERVER_TZ = "Etc/GMT-3"
+IST = ZoneInfo("Asia/Kolkata")
+
+
+ENABLED_SYMBOLS = ["XAUUSD", "XAGUSD"]
 
 
 class SymbolConfig(BaseModel):
@@ -11,9 +20,6 @@ class SymbolConfig(BaseModel):
     lot_size: float
     max_trades_per_day: int
     is_trade_able: bool
-
-
-
 
 
 # Master dictionary for all supported symbols
@@ -37,15 +43,15 @@ SYMBOL_CONFIGS: Dict[str, SymbolConfig] = {
     "XAGUSD": SymbolConfig(
         symbol="XAGUSD",
         threshold_pips=20,
-        pip_size=0.01,
+        pip_size=0.001,
         lot_size=0.5,
         max_trades_per_day=6,
         is_trade_able=False,
     ),
     "XAUUSD": SymbolConfig(
         symbol="XAUUSD",
-        threshold_pips=100,
-        pip_size=0.1,
+        threshold_pips=300,
+        pip_size=0.01,
         lot_size=0.5,
         max_trades_per_day=6,
         is_trade_able=True,

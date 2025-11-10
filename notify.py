@@ -214,8 +214,8 @@ def send_discord_message(channel: str, message: str) -> bool:
 
     return _post(url, {"content": message})
 
-if __name__ == "__main__":
-    send_discord_message("info", "✅ notify.py: removed Origin/Referer; should fix 50067.")
-    send_discord_message("alert", "✅ notify.py: removed Origin/Referer; should fix 50067.")
-    send_discord_message("normal", "✅ notify.py: removed Origin/Referer; should fix 50067.")
-    send_discord_message("critical", "✅ notify.py: removed Origin/Referer; should fix 50067.")
+# if __name__ == "__main__":
+#     send_discord_message("info", "✅ notify.py: removed Origin/Referer; should fix 50067.")
+#     send_discord_message("alert", "✅ notify.py: removed Origin/Referer; should fix 50067.")
+#     send_discord_message("normal", "✅ notify.py: removed Origin/Referer; should fix 50067.")
+#     send_discord_message("critical", "✅ notify.py: removed Origin/Referer; should fix 50067.")
