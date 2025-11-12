@@ -1,3 +1,4 @@
+from __future__ import annotations
 from config import SYMBOL_CONFIGS
 from datetime import datetime, timezone
 

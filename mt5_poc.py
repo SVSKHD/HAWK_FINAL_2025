@@ -1,4 +1,4 @@
-import MetaTrader5 as mt5
+import metatrader5 as mt5
 
 
 

@@ -1,5 +1,5 @@
 # main.py (patched)
-import MetaTrader5 as mt5
+
 from runner import run
 
 def main():

@@ -1,5 +1,5 @@
 from typing import Any, Dict, Optional, Tuple
-import MetaTrader5 as mt5
+import metatrader5 as mt5
 # --- Normalization helpers ----------------------------------------------------
 TradeType = str  # or Literal["buy","sell"] if you like
 

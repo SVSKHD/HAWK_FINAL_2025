@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 from typing import Dict, Any, Optional, Tuple, Literal
-import MetaTrader5 as mt5
+import metatrader5 as mt5
 from mt5 import init_mt5
 from zoneinfo import ZoneInfo
 from datetime import datetime

@@ -1,4 +1,4 @@
-import MetaTrader5 as mt5
+import metatrader5 as mt5
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from notify import send_discord_message
@@ -94,7 +94,7 @@ def place_trade(symbol: str, trade_type: TradeType, volume: float, comment: Opti
 
 
 from typing import List, Dict, Any, Optional
-import MetaTrader5 as mt5
+import metatrader5 as mt5
 
 def close_all_trades(*, deviation: int = 10,
                      include_masks: Optional[List[str]] = None) -> List[Dict[str, Any]]:
