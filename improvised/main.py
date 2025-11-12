@@ -4,13 +4,15 @@ from zoneinfo import ZoneInfo
 import time
 from typing import Dict, Any, Optional
 
-from config import SERVER_TZ, IST, ENABLED_SYMBOLS, HOUR, MINUTES
+from config import SERVER_TZ, IST, ENABLED_SYMBOLS, HOUR, MINUTES, NOTIFY_DELAY_SEC, SNAPSHOT_GRACE_SEC
 from prices import get_snapshot_at_ist_time, get_current_price, get_high_low_since_anchor
 from executor import execute_place_and_close
 from notify import send_discord_message
+from mt5 import init_mt5
+import MetaTrader5 as mt5
 
 # Toggle this to False for real trading
-DRY_RUN = True
+DRY_RUN = False
 
 state: Dict[str, Dict[str, Any]] = {
     s: {
@@ -75,60 +77,32 @@ def _send_start_price_notify(symbol: str) -> None:
     state[symbol]["start_notified_date_ist"] = today
 
 def _send_price_update(symbol: str, *, force: bool = False) -> None:
-    """
-    Send a compact price update:
-      • On boot (force=True)
-      • At scheduled HOUR:MINUTES IST once per day
-    """
     now_ist = datetime.now(IST)
     today = _today_ist_str()
 
+    has_today_snapshot = (state[symbol].get("last_snapshot_date_ist") == today)
+    start = state[symbol].get("start_price")
+
     if force:
-        # boot-time notify (once per process run)
-        if state[symbol]["boot_price_notified"]:
+        # Boot-time update ONLY if start_price exists (prevents Start=None)
+        if state[symbol]["boot_price_notified"] or not (has_today_snapshot and start is not None):
             return
     else:
-        # scheduled notify: once per IST day, within +/- 60s of target
+        # Scheduled update: require snapshot + start price
+        if not (has_today_snapshot and start is not None):
+            return
         if state[symbol]["last_price_notify_date_ist"] == today:
             return
+
         target = now_ist.replace(hour=HOUR, minute=MINUTES, second=0, microsecond=0)
-        if abs((now_ist - target).total_seconds()) > 60:
-            return  # not in the 1-minute window
+        send_time = target + timedelta(seconds=NOTIFY_DELAY_SEC)
 
-    # Gather data
-    start = state[symbol].get("start_price")
-    anchor_dt_srv = state[symbol].get("anchor_dt_srv")
+        # Must be after 09:05 (with a small 60s window)
+        if not (now_ist >= send_time and (now_ist - send_time).total_seconds() <= 60):
+            return
 
-    tick = get_current_price(symbol)
-    if not isinstance(tick, dict):
-        print(f"[WARN] price update skipped (no tick) for {symbol}: {tick}")
-        return
+    # ... build and send message as you already do ...
 
-    current = float(tick.get("last") or tick.get("bid") or tick.get("ask"))
-    high = low = current
-    if anchor_dt_srv:
-        try:
-            hl = get_high_low_since_anchor(symbol, anchor_dt_srv)
-            if hl:
-                high = hl.high if hl.high is not None else current
-                low  = hl.low  if hl.low  is not None else current
-        except Exception as e:
-            print(f"[WARN] extremes fetch failed for {symbol}: {e}")
-
-    msg = (
-        f"📊 **{symbol} Price Update**\n"
-        f"• Start (anchor): `{start}`\n"
-        f"• Current: `{current}`\n"
-        f"• High since anchor: `{high}`\n"
-        f"• Low since anchor: `{low}`\n"
-        f"• Time (IST): `{now_ist.strftime('%H:%M:%S')}`"
-    )
-    send_discord_message("info", msg)
-
-    if force:
-        state[symbol]["boot_price_notified"] = True
-    else:
-        state[symbol]["last_price_notify_date_ist"] = today
 
 def _ist_target_today() -> datetime:
     now_ist = datetime.now(IST)
@@ -139,41 +113,50 @@ def _ensure_daily_anchor(symbol: str):
     target_ist = _ist_target_today()
     now_ist = datetime.now(IST)
 
-    # 1) If before scheduled time, do nothing (keep yesterday’s start)
+    # Before scheduled time → do nothing
     if now_ist < target_ist:
         return
 
-    # 2) If we already snapped today (by IST calendar), skip
-    #    We store the anchor IST date inside state once we snapshot.
     if state[symbol].get("last_snapshot_date_ist") == today_ist:
         return
 
-    # 3) Take snapshot pinning IST calendar date to TODAY (prevents previous-day drift)
+    # (Optional) After a grace window, still keep trying; or you can bail if you want:
+    if (now_ist - target_ist).total_seconds() > SNAPSHOT_GRACE_SEC:
+        print(f"[WARN] {symbol}: still no start price after grace; continuing to retry.")
+        # no return → we keep retrying each loop
+
     snap = get_snapshot_at_ist_time(
         symbol=symbol,
-        requested_date_ist=now_ist.date(),   # <<< IMPORTANT: pin IST date
+        requested_date_ist=now_ist.date(),   # pin IST date
         server_timezone=SERVER_TZ,
         ist_hour=HOUR,
         ist_minute=MINUTES,
     )
     start_price = snap["anchors"]["price_at_anchor"]
     anchor_server_iso = snap["anchors"]["anchor_server"]
-    anchor_ist_iso = snap["anchors"].get("anchor_ist")  # ensure prices.py returns this
+    anchor_ist_iso = snap["anchors"].get("anchor_ist")
 
+    if start_price is None:
+        print(f"[INFO] {symbol}: waiting for first bar at/after anchor "
+              f"(server={anchor_server_iso}, ist={anchor_ist_iso})")
+        return
+
+    # Commit snapshot only when we have a real bar
     anchor_dt_srv = datetime.fromisoformat(anchor_server_iso)
-
-    # 4) Update state for the new day
-    state[symbol]["start_price"] = start_price
-    state[symbol]["anchor_server_iso"] = anchor_server_iso
-    state[symbol]["anchor_dt_srv"] = anchor_dt_srv
-    state[symbol]["last_snapshot_date_ist"] = today_ist
-    state[symbol]["previous_executables"] = None  # reset threshold timestamps for new day
-
+    state[symbol].update({
+        "start_price": start_price,
+        "anchor_server_iso": anchor_server_iso,
+        "anchor_dt_srv": anchor_dt_srv,
+        "last_snapshot_date_ist": today_ist,
+        "previous_executables": None,
+    })
     print(f"\n=== {symbol} — snapshot @ {HOUR:02d}:{MINUTES:02d} IST ===")
     print("start_price:", start_price)
     print("anchor_server:", anchor_server_iso)
-    if anchor_ist_iso:
-        print("anchor_ist:", anchor_ist_iso)
+    if anchor_ist_iso: print("anchor_ist:", anchor_ist_iso)
+
+    _send_start_price_notify(symbol)
+
 
 def _one_tick(symbol: str):
     if state[symbol]["anchor_dt_srv"] is None or state[symbol]["start_price"] is None:
@@ -209,6 +192,8 @@ def _one_tick(symbol: str):
 
 def main():
     print(f"Runner: daily snapshot at {HOUR:02d}:{MINUTES:02d} IST; per-second loop. DRY_RUN={DRY_RUN}")
+    if not mt5.initialize():
+        init_mt5("connected from main loop")
 
     # --- Boot-time price update for all symbols ---
     for s in ENABLED_SYMBOLS:

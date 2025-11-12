@@ -4,13 +4,15 @@ from pydantic import BaseModel
 from typing import Dict
 from zoneinfo import ZoneInfo
 
-HOUR = 10
+HOUR = 3
 MINUTES = 30
 SERVER_TZ = "Etc/GMT-3"
 IST = ZoneInfo("Asia/Kolkata")
 
 
 ENABLED_SYMBOLS = ["XAUUSD", "XAGUSD"]
+NOTIFY_DELAY_SEC = 300   # 5 minutes → 09:05
+SNAPSHOT_GRACE_SEC = 600 # optional: keep trying snapshot for 10 minutes after target
 
 
 class SymbolConfig(BaseModel):
