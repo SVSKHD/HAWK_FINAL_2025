@@ -439,39 +439,45 @@ def get_snapshot_at_server_time(
     snap["anchors"]["label"] = f"{hour_server:02d}:{minute_server:02d} server"
     return snap
 
+# prices.py
+from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
+from typing import Dict, Any, Optional, Tuple
+
 def get_snapshot_at_ist_time(
     symbol: str,
-    requested_date: Optional[date],
+    requested_date_ist: Optional[date],     # <-- IST calendar date
     server_timezone: str,
     ist_hour: int,
     ist_minute: int,
-    ist_timezone: str = "Asia/Kolkata",
     timeframes: Tuple[str, ...] = ("M1","M5","M15","M30","H1"),
-    weekend_policy: WeekendPolicy = "previous_trading_day",
 ) -> Dict[str, Any]:
-    """
-    Build snapshot anchored at a specific *IST time* (e.g., 11:30 IST).
-    Internally converts to server time and fetches the first bar at/after that moment.
-    """
-    init_mt5("from server_ist_prices.py")
-    _select_symbol(symbol)
+    tz_ist = ZoneInfo("Asia/Kolkata")
+    tz_srv = ZoneInfo(server_timezone)
 
-    server_tz = ZoneInfo(server_timezone)
-    tz_ist = ZoneInfo(ist_timezone)
-    d = datetime.now(tz_ist).date() if requested_date is None else requested_date
-    ist_dt = datetime(d.year, d.month, d.day, ist_hour, ist_minute, tzinfo=tz_ist)
-    server_dt = ist_dt.astimezone(server_tz)
+    ist_now = datetime.now(tz_ist)
+    ist_day = requested_date_ist or ist_now.date()
 
-    # Apply weekend policy on server calendar day
-    shifted_date, weekend_note = _shift_trading_day(server_dt.date(), weekend_policy)
-    target_srv = datetime(
-        shifted_date.year, shifted_date.month, shifted_date.day,
-        server_dt.hour, server_dt.minute, tzinfo=server_tz
-    )
+    # Build the exact IST target (pins the calendar day so it cannot roll back)
+    ist_target = datetime(ist_day.year, ist_day.month, ist_day.day, ist_hour, ist_minute, tzinfo=tz_ist)
+    target_srv = ist_target.astimezone(tz_srv)
 
-    snap = _build_snapshot_for_anchor(symbol, target_srv, ist_timezone, timeframes, weekend_note)
-    snap["anchors"]["label"] = f"{ist_hour:02d}:{ist_minute:02d} IST (converted)"
-    return snap
+    # Use your existing first/nearest bar helpers
+    bar = _first_bar_at_or_after(symbol, "M1", target_srv, search_minutes=90)
+    if not bar:
+        bar = _nearest_previous_bar(symbol, "M1", target_srv, lookback_minutes=240)
+
+    anchors = {
+        "anchor_server": target_srv.isoformat(),
+        "anchor_ist": ist_target.isoformat(),
+        "price_at_anchor": (bar["open_price"] if bar else None),
+    }
+    return {
+        "symbol": symbol,
+        "anchors": anchors,
+        "timeframes": {},
+        "meta": {"source": "MT5", "version": "1.1.2"},
+    }
 
 
 

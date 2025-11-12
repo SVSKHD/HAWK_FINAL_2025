@@ -130,40 +130,50 @@ def _send_price_update(symbol: str, *, force: bool = False) -> None:
     else:
         state[symbol]["last_price_notify_date_ist"] = today
 
-def _ensure_daily_anchor(symbol: str):
-    """Take (or ensure we have) the daily anchor at HOUR:MINUTES IST for a symbol."""
-    today = _today_ist_str()
-    if state[symbol]["last_snapshot_date_ist"] == today:
-        return
-
+def _ist_target_today() -> datetime:
     now_ist = datetime.now(IST)
-    target = now_ist.replace(hour=HOUR, minute=MINUTES, second=0, microsecond=0)
-    if now_ist < target:
+    return now_ist.replace(hour=HOUR, minute=MINUTES, second=0, microsecond=0)
+
+def _ensure_daily_anchor(symbol: str):
+    today_ist = _today_ist_str()
+    target_ist = _ist_target_today()
+    now_ist = datetime.now(IST)
+
+    # 1) If before scheduled time, do nothing (keep yesterday’s start)
+    if now_ist < target_ist:
         return
 
-    # Take snapshot (start price at HOUR:MINUTES IST converted to server tz)
+    # 2) If we already snapped today (by IST calendar), skip
+    #    We store the anchor IST date inside state once we snapshot.
+    if state[symbol].get("last_snapshot_date_ist") == today_ist:
+        return
+
+    # 3) Take snapshot pinning IST calendar date to TODAY (prevents previous-day drift)
     snap = get_snapshot_at_ist_time(
         symbol=symbol,
-        requested_date=None,
+        requested_date_ist=now_ist.date(),   # <<< IMPORTANT: pin IST date
         server_timezone=SERVER_TZ,
         ist_hour=HOUR,
         ist_minute=MINUTES,
     )
     start_price = snap["anchors"]["price_at_anchor"]
     anchor_server_iso = snap["anchors"]["anchor_server"]
+    anchor_ist_iso = snap["anchors"].get("anchor_ist")  # ensure prices.py returns this
+
     anchor_dt_srv = datetime.fromisoformat(anchor_server_iso)
 
+    # 4) Update state for the new day
     state[symbol]["start_price"] = start_price
     state[symbol]["anchor_server_iso"] = anchor_server_iso
     state[symbol]["anchor_dt_srv"] = anchor_dt_srv
-    state[symbol]["last_snapshot_date_ist"] = today
+    state[symbol]["last_snapshot_date_ist"] = today_ist
+    state[symbol]["previous_executables"] = None  # reset threshold timestamps for new day
 
     print(f"\n=== {symbol} — snapshot @ {HOUR:02d}:{MINUTES:02d} IST ===")
     print("start_price:", start_price)
     print("anchor_server:", anchor_server_iso)
-
-    # send the Start Price notice once/day
-    _send_start_price_notify(symbol)
+    if anchor_ist_iso:
+        print("anchor_ist:", anchor_ist_iso)
 
 def _one_tick(symbol: str):
     if state[symbol]["anchor_dt_srv"] is None or state[symbol]["start_price"] is None:
