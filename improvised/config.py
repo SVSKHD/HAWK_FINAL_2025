@@ -14,6 +14,7 @@ ENABLED_SYMBOLS = ["XAUUSD", "XAGUSD"]
 NOTIFY_DELAY_SEC = 300   # 5 minutes → 09:05
 SNAPSHOT_GRACE_SEC = 600 # optional: keep trying snapshot for 10 minutes after target
 
+DRY_RUN = False # Toggle this to False for real trading
 
 class SymbolConfig(BaseModel):
     symbol: str
@@ -44,8 +45,8 @@ SYMBOL_CONFIGS: Dict[str, SymbolConfig] = {
     ),
     "XAGUSD": SymbolConfig(
         symbol="XAGUSD",
-        threshold_pips=150,
-        pip_size=0.001,
+        threshold_pips=60,
+        pip_size=0.01,
         lot_size=0.5,
         max_trades_per_day=6,
         is_trade_able=False,

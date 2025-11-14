@@ -228,7 +228,7 @@ def close_symbol_positions(symbol: str, *, deviation: int = 10) -> List[Dict[str
 
 # quick test (will actually try to trade if MT5 connected!)
 if __name__ == "__main__":
-    place_trade("BTCUSD", "buy", 0.5)
+    place_trade("XAGUSD", "buy", 0.5)
     # positions=close_symbol_positions("EURUSD")
     # closed_positions = close_all_trades()
     # print("closed", closed_positions)

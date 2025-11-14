@@ -4,15 +4,14 @@ from zoneinfo import ZoneInfo
 import time
 from typing import Dict, Any, Optional
 
-from config import SERVER_TZ, IST, ENABLED_SYMBOLS, HOUR, MINUTES, NOTIFY_DELAY_SEC, SNAPSHOT_GRACE_SEC
+from config import SERVER_TZ, IST, ENABLED_SYMBOLS, HOUR, MINUTES, NOTIFY_DELAY_SEC, SNAPSHOT_GRACE_SEC,DRY_RUN
 from prices import get_snapshot_at_ist_time, get_current_price, get_high_low_since_anchor
 from executor import execute_place_and_close
 from notify import send_discord_message
 from mt5 import init_mt5
 import MetaTrader5 as mt5
 
-# Toggle this to False for real trading
-DRY_RUN = False
+
 
 state: Dict[str, Dict[str, Any]] = {
     s: {
@@ -184,7 +183,7 @@ def _one_tick(symbol: str):
         high=high,
         low=low,
         previous_executables=prev_exec,
-        dry_run=DRY_RUN,
+        dry_run=False,
     )
 
     state[symbol]["previous_executables"] = resp.get("executables")

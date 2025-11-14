@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 from threshold_logic import Threshold
 from trade import place_trade, close_symbol_positions
-
+from config import SYMBOL_CONFIGS
 _last_action: Dict[str, str] = {}
 
 def _now_iso() -> str:
@@ -31,7 +31,7 @@ def execute_place_and_close(
     high: float,
     low: float,
     previous_executables: Optional[Dict[str, Any]] = None,
-    dry_run: bool = True,
+    dry_run: bool = None,
 ) -> Dict[str, Any]:
     """
     Run Threshold and (optionally) execute trades.
@@ -50,6 +50,8 @@ def execute_place_and_close(
     print(f"second@2x: {execs.get('second_threshold_reached_at')}")
     print(f"breach_high: {execs['breach_high']}  breach_low: {execs['breach_low']}")
 
+    symbol_data = SYMBOL_CONFIGS.get(symbol)
+    lot_size = symbol_data.lot_size
     result: Dict[str, Any] = {
         "timestamp": _now_iso(),
         "symbol": symbol,
@@ -83,12 +85,12 @@ def execute_place_and_close(
     try:
         if action == "place_long_trade":
             print(f"→ placing LONG (BUY) for {symbol}")
-            resp = place_trade(symbol, "buy", comment="AstraHawk LONG")
+            resp = place_trade(symbol, "buy", symbol_data.lot_size)
             result["trade_response"] = _safe_trade_response(resp)
 
         elif action == "place_short_trade":
             print(f"→ placing SHORT (SELL) for {symbol}")
-            resp = place_trade(symbol, "sell", comment="AstraHawk SHORT")
+            resp = place_trade(symbol, "sell", symbol_data.lot_size)
             result["trade_response"] = _safe_trade_response(resp)
 
         elif action == "close":
@@ -107,26 +109,26 @@ def execute_place_and_close(
     return result
 
 
-# --- SAMPLE RUN ---
-if __name__ == "__main__":
-    """
-    Simulated sample:
-    - start = 3999.00 (anchor)
-    - current = 4002.00 (movement)
-    - high / low boundaries simulate intraday levels
-    """
-    print("\n--- Sample Run: Threshold Execution Demo ---")
-
-    # You can toggle dry_run=True to skip MT5 trades
-    response = execute_place_and_close(
-        symbol="XAUUSD",
-        start=3999.00,
-        current=3996.00,
-        high=4003.77,
-        low=4000.76,
-        dry_run=True
-    )
-
-    print("\n=== Final Response ===")
-    for k, v in response.items():
-        print(f"{k}: {v}")
+# # --- SAMPLE RUN ---
+# if __name__ == "__main__":
+#     """
+#     Simulated sample:
+#     - start = 3999.00 (anchor)
+#     - current = 4002.00 (movement)
+#     - high / low boundaries simulate intraday levels
+#     """
+#     print("\n--- Sample Run: Threshold Execution Demo ---")
+#
+#     # You can toggle dry_run=True to skip MT5 trades
+#     response = execute_place_and_close(
+#         symbol="XAUUSD",
+#         start=3999.00,
+#         current=3996.00,
+#         high=4003.77,
+#         low=4000.76,
+#         dry_run=True
+#     )
+#
+#     print("\n=== Final Response ===")
+#     for k, v in response.items():
+#         print(f"{k}: {v}")
