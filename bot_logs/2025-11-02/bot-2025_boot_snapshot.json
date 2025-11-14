@@ -1,0 +1,32 @@
+[
+  {
+    "symbol": "XAUUSD",
+    "start_price": 4011.18,
+    "current_price": 4002.545,
+    "timestamp": "2025-11-02T12:20:26"
+  },
+  {
+    "symbol": "XAGUSD",
+    "start_price": 48.913,
+    "current_price": 48.689499999999995,
+    "timestamp": "2025-11-02T12:20:26"
+  },
+  {
+    "symbol": "EURUSD",
+    "start_price": 1.15678,
+    "current_price": 1.153805,
+    "timestamp": "2025-11-02T12:20:26"
+  },
+  {
+    "symbol": "GBPUSD",
+    "start_price": 1.31521,
+    "current_price": 1.31497,
+    "timestamp": "2025-11-02T12:20:26"
+  },
+  {
+    "symbol": "USDJPY",
+    "start_price": 153.876,
+    "current_price": 154.0,
+    "timestamp": "2025-11-02T12:20:26"
+  }
+]
