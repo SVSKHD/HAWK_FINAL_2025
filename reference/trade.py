@@ -4,37 +4,41 @@ from datetime import datetime, timezone
 from notify import send_discord_message
 from mt5 import init_mt5
 from utils_formatting import format_discord_trade_message, _format_failure, _format_success, normalize_trade_result
-
-# optional: tighten type a bit
+from datetime import datetime, timezone
+from typing import Optional
+import re
 
 TradeType = str  # or Literal["buy","sell"] if you like
 
 
-import re
-from datetime import datetime, timezone
+MAX_COMMENT_LEN = 31
+_ascii_re = re.compile(r"[^\x00-\x7F]")   # remove non-ascii
 
-MAX_COMMENT_LEN = 31  # common MT5/broker limit (some allow 32)
 
-_ascii_re = re.compile(r"[^\x20-\x7E]")  # printable ASCII only
-
-def make_order_comment(base: Optional[str] = None) -> str:
+def make_order_comment(base: Optional[str] = "Astra") -> str:
     """
-    Build a broker-safe order comment:
-    - ASCII only (no emojis, no en-dash)
-    - <= 31 chars
+    Returns MT5-safe, ASCII-only, <=31 chars comment.
+    Format: Astra-DDMMYY
+    Example: Astra-151125
     """
-    # keep it short: YYYYMMDD-HHMMSS (15 chars)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    now = datetime.utcnow()
 
-    # avoid fancy punctuation: use plain hyphen
-    base = (base or "AstraBot").strip().replace("–", "-").replace("—", "-")
-    raw = f"{base} {ts}"
+    # DDMMYY
+    ts = now.strftime("%d%m%y")   # 6 chars → 151125
 
-    # remove non-ASCII
+    # clean base
+    base = (base or "Astra").strip()
+    base = base.replace("–", "-").replace("—", "-")
+
+    # final pattern
+    raw = f"{base}-{ts}"  # Astra-151125
+
+    # ensure ASCII only
     raw = _ascii_re.sub("", raw)
 
-    # trim to limit
+    # trim to broker limit
     return raw[:MAX_COMMENT_LEN]
+
 
 
 
@@ -185,7 +189,7 @@ def close_symbol_positions(symbol: str, *, deviation: int = 10) -> List[Dict[str
 # quick test (will actually try to trade if MT5 connected!)
 if __name__ == "__main__":
     place_trade("BTCUSD", "buy", 0.5)
-    positions=close_symbol_positions("EURUSD")
-    print(positions)
-    all_positions = close_all_trades()
+    # positions=close_symbol_positions("EURUSD")
+    # print(positions)
+    # all_positions = close_all_trades()
     # print(all_posiitons)

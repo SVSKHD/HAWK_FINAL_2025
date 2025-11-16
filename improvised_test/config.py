@@ -13,7 +13,7 @@ IST = ZoneInfo("Asia/Kolkata")
 ENABLED_SYMBOLS = ["XAUUSD", "XAGUSD"]
 NOTIFY_DELAY_SEC = 300   # 5 minutes → 09:05
 SNAPSHOT_GRACE_SEC = 600 # optional: keep trying snapshot for 10 minutes after target
-
+DAILY_PROFIT=300
 DRY_RUN = False # Toggle this to False for real trading
 
 class SymbolConfig(BaseModel):
