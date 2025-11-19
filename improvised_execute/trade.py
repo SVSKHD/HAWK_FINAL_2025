@@ -1,46 +1,171 @@
-import metatrader5 as mt5
-from typing import Optional, List, Dict, Any
+from __future__ import annotations
+
+import re
 from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any, Literal
+
+import metatrader5 as mt5
+
 from notify import send_discord_message
 from mt5 import init_mt5
 from utils import format_discord_trade_message, _format_failure, _format_success, normalize_trade_result
 
-# optional: tighten type a bit
+# Type alias for clarity
+TradeType = Literal["buy", "sell"]
 
-TradeType = str  # or Literal["buy","sell"] if you like
+# --- Comment + ASCII constraints ---
+MAX_COMMENT_LEN = 16  # be extra conservative
+_ascii_re = re.compile(r"[^A-Za-z0-9\-]")  # only letters, digits, hyphen
+
+
+# ============================================================
+#   COMMENT HELPERS (ASTRA DAILY TAGS)
+# ============================================================
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 import re
 from datetime import datetime, timezone
 
-MAX_COMMENT_LEN = 31  # common MT5/broker limit (some allow 32)
 
-_ascii_re = re.compile(r"[^\x20-\x7E]")  # printable ASCII only
+
 
 def make_order_comment(base: Optional[str] = None) -> str:
     """
-    Build a broker-safe order comment:
-    - ASCII only (no emojis, no en-dash)
-    - <= 31 chars
+    Build a *very* broker-safe order comment:
+    - uppercase letters, digits, hyphen only
+    - no spaces
+    - max 16 characters
+    Example: ASTB-1711251305
     """
-    # keep it short: YYYYMMDD-HHMMSS (15 chars)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    now = datetime.now(timezone.utc)
+    # short bot tag + time: AST(B/S) + - + DDMM + HHMM
+    # e.g. ASTB-1711-1305  -> strip non-allowed and trim
+    base = (base or "AST").upper()
+    base = _ascii_re.sub("", base)
+    ts = now.strftime("%d%m%H%M")  # DDMMHHMM
 
-    # avoid fancy punctuation: use plain hyphen
-    base = (base or "AstraBot").strip().replace("–", "-").replace("—", "-")
-    raw = f"{base} {ts}"
-
-    # remove non-ASCII
+    raw = f"{base}-{ts}"  # ex: ASTB-17111305
     raw = _ascii_re.sub("", raw)
-
-    # trim to limit
     return raw[:MAX_COMMENT_LEN]
 
 
 
-def place_trade(symbol: str, trade_type: TradeType, volume: float, comment: Optional[str] = None):
-    init_mt5("place_trade from trade.py")
+def make_astra_base(trade_type: TradeType) -> str:
+    """
+    Base pattern used for Astra trades in this bot:
 
+      Astra-DDMMYY-BUY
+      Astra-DDMMYY-SELL
+
+    This base is then passed into make_order_comment(), so the final
+    order comment will *start* with Astra-DDMMYY-BUY/SELL and then
+    may have truncated timestamp.
+    """
+    day_tag = _now_utc().strftime("%d%m%y")  # e.g. 171125
+    base = f"Astra-{day_tag}-{trade_type.upper()}"
+    base = base.replace("–", "-").replace("—", "-")
+    base = _ascii_re.sub("", base)
+    return base[:MAX_COMMENT_LEN]
+
+
+def today_astra_prefix() -> str:
+    """
+    Prefix that identifies today's Astra trades for filtering:
+
+      Astra-DDMMYY-
+    """
+    day_tag = _now_utc().strftime("%d%m%y")
+    return f"Astra-{day_tag}-"
+
+
+# ============================================================
+#   MT5 / POSITION HELPERS
+# ============================================================
+
+def _ensure_mt5() -> None:
+    """
+    Ensure MT5 is connected via your wrapper. Raises if not.
+    """
+    # Use your own helper first
+    init_mt5("called from trade.py")
+    # (init_mt5 should internally initialize MT5; if not, you can also check mt5.initialize() here)
+
+
+def get_open_positions(symbol: Optional[str] = None) -> List[Any]:
+    """
+    Return list of open positions. If symbol is given, filter to that symbol.
+    """
+    if symbol:
+        positions = mt5.positions_get(symbol=symbol)
+    else:
+        positions = mt5.positions_get()
+
+    if positions is None:
+        return []
+    return list(positions)
+
+
+def get_astra_positions_today(symbol: Optional[str] = None) -> List[Any]:
+    """
+    Return all *Astra* open positions for *today* (by comment prefix Astra-DDMMYY-).
+    Optional: filter by symbol.
+    """
+    prefix = today_astra_prefix()
+    all_pos = get_open_positions(symbol)
+    return [p for p in all_pos if getattr(p, "comment", "").startswith(prefix)]
+
+
+def has_conflicting_position(symbol: str, trade_type: TradeType) -> bool:
+    """
+    Check if there is an open position in the *opposite* direction for this symbol.
+    This prevents simultaneous BUY + SELL on the same symbol.
+
+    - Allows multiple stacked same-direction positions (e.g. multiple BUYs).
+    - Blocks BUY if any SELL is open.
+    - Blocks SELL if any BUY is open.
+    """
+    positions = get_open_positions(symbol)
+    if not positions:
+        return False
+
+    for p in positions:
+        p_type = getattr(p, "type", None)
+        if trade_type == "buy" and p_type == mt5.POSITION_TYPE_SELL:
+            return True
+        if trade_type == "sell" and p_type == mt5.POSITION_TYPE_BUY:
+            return True
+    return False
+
+
+# ============================================================
+#   TRADE EXECUTION
+# ============================================================
+
+def place_trade(symbol: str, trade_type: TradeType, volume: float, comment: Optional[str] = None):
+    """
+    Place a market order (BUY/SELL) for symbol with Astra daily comment.
+
+    - Uses `make_astra_base()` to produce comments like:
+        Astra-171125-BUY ...
+    - Prevents simultaneous opposite-side positions on the same symbol.
+    """
+    _ensure_mt5()
+
+    # 1) Guard: prevent conflicting opposite position
+    if has_conflicting_position(symbol, trade_type):
+        msg = (
+            f"⚠️ Trade skipped (conflicting position exists)\n"
+            f"**Symbol:** {symbol}\n"
+            f"**Requested:** {trade_type.upper()} {volume}\n"
+        )
+        print(msg)
+        send_discord_message("alert", msg)
+        return False
+
+    # 2) Fetch tick
     tick = mt5.symbol_info_tick(symbol)
     if not tick:
         msg = f"❌ No tick data for {symbol}"
@@ -51,8 +176,10 @@ def place_trade(symbol: str, trade_type: TradeType, volume: float, comment: Opti
     is_buy = (trade_type == "buy")
     price = tick.ask if is_buy else tick.bid
     order_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
-    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    order_comment = make_order_comment(comment or "AstraBot")
+
+    # 3) Comment (Astra-DDMMYY-BUY/SELL + timestamp)
+    base = comment or make_astra_base(trade_type)
+    order_comment = make_order_comment(base)
 
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
@@ -63,7 +190,7 @@ def place_trade(symbol: str, trade_type: TradeType, volume: float, comment: Opti
         "deviation": 10,
         "comment": order_comment,
         "type_filling": mt5.ORDER_FILLING_FOK,
-        "type_time": mt5.ORDER_TIME_GTC
+        "type_time": mt5.ORDER_TIME_GTC,
     }
 
     result = mt5.order_send(request)
@@ -91,26 +218,28 @@ def place_trade(symbol: str, trade_type: TradeType, volume: float, comment: Opti
     return result
 
 
+# ============================================================
+#   CLOSE ALL TRADES (DANGEROUS UTILITY)
+# ============================================================
 
-
-from typing import List, Dict, Any, Optional
-import metatrader5 as mt5
-
-def close_all_trades(*, deviation: int = 10,
-                     include_masks: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def close_all_trades(
+    *,
+    deviation: int = 10,
+    include_masks: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
     """
-    Close ALL open positions, optionally filtering by Python-side include masks on symbol.
-    - include_masks: list of substrings; a position is kept if any mask is in pos.symbol.
-                     e.g. ["BTC", "XBT", "USD"] to catch BTC, XBT, BTCUSD, BTCUSDT, etc.
+    Close ALL open positions, optionally filtering by symbol substrings.
+
+    ⚠ Warning:
+        This is a heavy hammer. Use mainly for emergency/manual cleanup.
+
+    - include_masks: list of substrings; position is included if any mask
+      is present in pos.symbol (case-insensitive).
     """
     results: List[Dict[str, Any]] = []
 
-    # Ensure terminal is ready
-    if not mt5.initialize():
-        code, details = mt5.last_error()
-        raise RuntimeError(f"MT5 initialize failed: {code} {details}")
+    _ensure_mt5()
 
-    # Don’t use 'group' filter; fetch all and filter in Python
     positions = mt5.positions_get()
     if positions is None:
         code, details = mt5.last_error()
@@ -121,7 +250,6 @@ def close_all_trades(*, deviation: int = 10,
         print("[close_all_trades] No open positions.")
         return results
 
-    # Optional filter by symbol substring(s)
     def _keep(pos) -> bool:
         if not include_masks:
             return True
@@ -159,7 +287,6 @@ def close_all_trades(*, deviation: int = 10,
         }
 
         res = mt5.order_send(request)
-        # Minimal normalized record (replace with your normalize_trade_result if you have it)
         rec = {
             "symbol": symbol,
             "position_ticket": int(getattr(pos, "ticket", 0)),
@@ -174,21 +301,55 @@ def close_all_trades(*, deviation: int = 10,
                 "deal": getattr(res, "deal", None),
             },
         }
-        print(f"[closed] {symbol} {rec['closed_side']} vol={rec['volume']} price={rec['price']} ret={rec['response']['retcode']}")
+        print(
+            f"[closed] {symbol} {rec['closed_side']} "
+            f"vol={rec['volume']} price={rec['price']} "
+            f"ret={rec['response']['retcode']}"
+        )
         results.append(rec)
 
     return results
 
 
+# ============================================================
+#   CLOSE POSITIONS FOR ONE SYMBOL (ASTRA ONLY)
+# ============================================================
 
 def close_symbol_positions(symbol: str, *, deviation: int = 10) -> List[Dict[str, Any]]:
+    """
+    Close all *Astra* positions for this symbol for *today*.
+    (Comment prefix Astra-DDMMYY-)
+
+    Uses your normalize_trade_result + format_discord_trade_message.
+    """
+    _ensure_mt5()
+
     results: List[Dict[str, Any]] = []
-    positions = mt5.positions_get(symbol=symbol) or ()
+
+    positions = get_astra_positions_today(symbol) or ()
+    if not positions:
+        # No Astra positions for today on this symbol – just log & exit
+        n = normalize_trade_result(
+            context={
+                "symbol": symbol,
+                "side": "close",
+                "comment": "No Astra positions to close for today",
+            }
+        )
+        ch, msg = format_discord_trade_message(n)
+        print(msg)
+        send_discord_message(ch, msg)
+        return results
+
     for pos in positions:
         tick = mt5.symbol_info_tick(symbol)
         if not tick:
             n = normalize_trade_result(
-                context={"symbol": symbol, "side": "close", "comment": "No tick data during close_symbol_positions"}
+                context={
+                    "symbol": symbol,
+                    "side": "close",
+                    "comment": "No tick data during close_symbol_positions",
+                }
             )
             ch, msg = format_discord_trade_message(n)
             print(msg)
@@ -209,30 +370,34 @@ def close_symbol_positions(symbol: str, *, deviation: int = 10) -> List[Dict[str
             "deviation": int(deviation),
             "type_filling": mt5.ORDER_FILLING_FOK,
             "type_time": mt5.ORDER_TIME_GTC,
-            "comment": f"bot-2025 close {'long' if is_long else 'short'}",
+            "comment": make_order_comment("Astra-close"),
         }
         res = mt5.order_send(request)
         n = normalize_trade_result(
             request=request,
             response=res,
-            context={"symbol": symbol, "side": "SELL" if is_long else "BUY", "volume": float(pos.volume), "price": price},
+            context={
+                "symbol": symbol,
+                "side": "SELL" if is_long else "BUY",
+                "volume": float(pos.volume),
+                "price": price,
+            },
         )
         ch, msg = format_discord_trade_message(n)
         print(msg)
         send_discord_message(ch, msg)
         results.append(n)
+
     return results
 
 
+# ============================================================
+#   QUICK LOCAL TEST (⚠ will trade if MT5 is LIVE!)
+# ============================================================
 
-
-# quick test (will actually try to trade if MT5 connected!)
 if __name__ == "__main__":
-    place_trade("XAGUSD", "buy", 0.5)
-    # positions=close_symbol_positions("EURUSD")
-    # closed_positions = close_all_trades()
-    # print("closed", closed_positions)
-    print(50*"*==")
-    # close_positions_by_symbol = close_symbol_positions("BTCUSD")
-    print(50 * "*==")
-
+    # ⚠ Only run this when you *want* a real test.
+    posiiton=place_trade("XAGUSD", "buy", 0.5)
+    print(posiiton)
+    # close_symbol_positions("XAGUSD")
+    print("trade.py loaded. Manual tests commented out.")

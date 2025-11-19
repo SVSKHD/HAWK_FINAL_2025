@@ -45,15 +45,15 @@ SYMBOL_CONFIGS: Dict[str, SymbolConfig] = {
     ),
     "XAGUSD": SymbolConfig(
         symbol="XAGUSD",
-        threshold_pips=10,
-        pip_size=0.01,
+        threshold_pips=300,
+        pip_size=0.001,
         lot_size=0.5,
         max_trades_per_day=6,
         is_trade_able=False,
     ),
     "XAUUSD": SymbolConfig(
         symbol="XAUUSD",
-        threshold_pips=300,
+        threshold_pips=400,
         pip_size=0.01,
         lot_size=0.5,
         max_trades_per_day=6,
