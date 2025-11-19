@@ -1,13 +1,19 @@
 # apps/bot-runner/src/config/symbols.py
+from __future__ import annotations
 
 from pydantic import BaseModel
 from typing import Dict
 from zoneinfo import ZoneInfo
+from datetime import datetime
 
 HOUR = 3
 MINUTES = 30
 SERVER_TZ = "Etc/GMT-3"
 IST = ZoneInfo("Asia/Kolkata")
+PROFIT_LIMIT_USD = 200.0       # stop after $200 realized profit in window
+ASTRA_PREFIX = "Astra-"        # what your order comment starts with
+WATCHDOG_FROM_UTC: datetime | None = None
+_last_action: Dict[str, str] = {}
 
 
 ENABLED_SYMBOLS = ["XAUUSD", "XAGUSD"]

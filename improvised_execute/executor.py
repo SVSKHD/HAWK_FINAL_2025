@@ -7,7 +7,7 @@ import metatrader5 as mt5
 
 from threshold_logic import Threshold
 from trade import place_trade, close_symbol_positions
-from config import SYMBOL_CONFIGS
+from config import SYMBOL_CONFIGS, IST, HOUR, MINUTES, WATCHDOG_FROM_UTC
 from mongo_connector import STATE as mongo_state  # <- MongoState singleton
 
 
@@ -28,6 +28,7 @@ LOSS_LIMIT_USD: Optional[float] = None  # e.g. -200.0
 
 # In-memory last action per symbol to avoid spamming same command
 _last_action: Dict[str, str] = {}
+ASTRA_PREFIX = "Astra-"   # must match trade.py comment prefix
 
 
 # ==========================
@@ -69,51 +70,31 @@ def _safe_trade_response(resp: Any) -> Any:
 #   PNL WATCHDOG (ACCOUNT)
 # ==========================
 
-def _today_utc_bounds() -> Tuple[datetime, datetime]:
-    """
-    Returns (start_of_today_UTC, now_UTC).
-    Used for MT5 history_deals_get.
-    """
+def _profit_window_bounds() -> tuple[datetime, datetime]:
     now = _now_utc()
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)  # or from Mongo anchor later
     return start, now
 
-
-def get_today_realized_profit() -> float:
+def get_window_realized_profit() -> float:
     """
-    Realized profit for *all* deals closed today (UTC).
-    Simple account-level view.
+    Realized profit only for Astra trades in current window.
     """
-    utc_from, utc_to = _today_utc_bounds()
+    utc_from, utc_to = _profit_window_bounds()
     deals = mt5.history_deals_get(utc_from, utc_to)
     if not deals:
         return 0.0
 
     total = 0.0
     for d in deals:
+        comment = (getattr(d, "comment", "") or "").strip()
+        if not comment.startswith(ASTRA_PREFIX):
+            continue
         total += float(getattr(d, "profit", 0.0))
     return total
 
-
-def get_open_pnl() -> float:
-    """
-    Current PnL of all open positions (account-level).
-    """
-    positions = mt5.positions_get()
-    if not positions:
-        return 0.0
-
-    total = 0.0
-    for p in positions:
-        total += float(getattr(p, "profit", 0.0))
-    return total
-
-
 def get_total_pnl() -> float:
-    """
-    Total PnL = realized today + open PnL.
-    """
-    return get_today_realized_profit() + get_open_pnl()
+    # WATCHDOG = realized Astra profit only
+    return get_window_realized_profit()
 
 
 # ==========================

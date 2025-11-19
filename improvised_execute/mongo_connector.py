@@ -21,8 +21,8 @@ from pymongo.errors import PyMongoError
 #   MONGO_STATE_COLL="daily_state"
 #   MONGO_EVENTS_COLL="trade_events"
 
-MONGO_URI = os.getenv("MONGO_URI", "").strip()
-MONGO_DB_NAME = os.getenv("MONGO_DB", "astra_bot")
+MONGO_URI = os.getenv("MONGO_ATLAS_URI", "").strip()
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "astra_bot")
 MONGO_STATE_COLL_NAME = os.getenv("MONGO_STATE_COLL", "daily_state")
 MONGO_EVENTS_COLL_NAME = os.getenv("MONGO_EVENTS_COLL", "trade_events")
 
